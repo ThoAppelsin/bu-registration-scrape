@@ -1450,10 +1450,10 @@ void PrintProgrammesIntoFile(FILE * const ProgrammesFile)
 {
 	/*
 	|1 a1 ProgrammeLookupIndex
-	   a2 b1 LessonLookupIndex b2 LessonNameLookupIndex b3 CreditsLookupIndex b4 LinkLookupIndex
-	      b5 c1 LectureTypeLookupIndex
-		     c2 d1 SectionLookupIndex d2 InstructorLookupIndex d3 RawDaysLookupIndex d4 RawSlotsLookupIndex d5 RawClassroomsLookupIndex d6 LectureGroupState
-		        d7 e1 Day e2 Slot e3 ClassroomLookupIndex
+	   b1 c1 LessonLookupIndex c2 LessonNameLookupIndex c3 CreditsLookupIndex c4 LinkLookupIndex
+	      d1 e1 LectureTypeLookupIndex
+		     f1 g1 SectionLookupIndex g2 InstructorLookupIndex g3 RawDaysLookupIndex g4 RawSlotsLookupIndex g5 RawClassroomsLookupIndex g6 LectureGroupState
+		        h1 i1 Day i2 Slot i3 ClassroomLookupIndex
 	
 	#1: |
 	#2: a
@@ -1463,6 +1463,8 @@ void PrintProgrammesIntoFile(FILE * const ProgrammesFile)
 	#6: e
 	#7: f
 	#8: g
+	#9: h
+	#10:i
 	*/
 	for (const MyProgramme * const * PFirstProgrammeP = APProgrammes; *PFirstProgrammeP; PFirstProgrammeP++)
 	{
@@ -1471,7 +1473,7 @@ void PrintProgrammesIntoFile(FILE * const ProgrammesFile)
 				 );
 		for (const MyLesson * const * PFirstLessonP = (*PFirstProgrammeP)->APLessons; *PFirstLessonP; PFirstLessonP++)
 		{
-			fwprintf(ProgrammesFile, L"ab%ub%ub%ub%u",
+			fwprintf(ProgrammesFile, L"bc%uc%uc%uc%u",
 					 (*PFirstLessonP)->PLessonLookup->OrderedIndex,
 					 (*PFirstLessonP)->PLessonNameLookup->OrderedIndex,
 					 (*PFirstLessonP)->PCreditsLookup->OrderedIndex,
@@ -1479,12 +1481,12 @@ void PrintProgrammesIntoFile(FILE * const ProgrammesFile)
 					 );
 			for (const MyLectureType * const * PFirstLectureTypeP = (*PFirstLessonP)->APLectureTypes; *PFirstLectureTypeP; PFirstLectureTypeP++)
 			{
-				fwprintf(ProgrammesFile, L"bc%u",
+				fwprintf(ProgrammesFile, L"de%u",
 						 (*PFirstLectureTypeP)->PLectureTypeLookup->OrderedIndex // 1 has a special meaning, indicates (main)
 						 );
 				for (const MyLectureGroup * const * PFirstLectureGroupP = (*PFirstLectureTypeP)->APLectureGroups; *PFirstLectureGroupP; PFirstLectureGroupP++)
 				{
-					fwprintf(ProgrammesFile, L"cd%ud%ud%ud%ud%ud%u",
+					fwprintf(ProgrammesFile, L"fg%ug%ug%ug%ug%ug%u",
 							 (*PFirstLectureGroupP)->PSectionLookup->OrderedIndex,
 							 (*PFirstLectureGroupP)->PInstructorLookup->OrderedIndex,
 							 (*PFirstLectureGroupP)->PRawDaysLookup->OrderedIndex,
@@ -1494,7 +1496,7 @@ void PrintProgrammesIntoFile(FILE * const ProgrammesFile)
 							 );
 					for (size_t LectureIndex = 0; LectureIndex < (*PFirstLectureGroupP)->NumberofLectures; LectureIndex++)
 					{
-						fwprintf(ProgrammesFile, L"de%ue%ue%u",
+						fwprintf(ProgrammesFile, L"hi%ui%ui%u",
 								 (*PFirstLectureGroupP)->ALectures[LectureIndex].Day,
 								 (*PFirstLectureGroupP)->ALectures[LectureIndex].Slot,
 								 (*PFirstLectureGroupP)->ALectures[LectureIndex].PClassroomLookup->OrderedIndex
@@ -2166,7 +2168,7 @@ int main(void)
 	FILE * CreditsLookupFile		= _wfopen(L"CreditsLookup.txt",			L"w, ccs=UNICODE");
 	FILE * LinkLookupFile			= _wfopen(L"LinkLookup.txt",			L"w, ccs=UNICODE");
 	FILE * LectureTypeLookupFile	= _wfopen(L"LectureTypeLookup.txt",		L"w, ccs=UNICODE");
-	FILE * SectionsLookupFile		= _wfopen(L"SectionsLookup.txt",		L"w, ccs=UNICODE");
+	FILE * SectionLookupFile		= _wfopen(L"SectionLookup.txt",			L"w, ccs=UNICODE");
 	FILE * InstructorLookupFile		= _wfopen(L"InstructorLookup.txt",		L"w, ccs=UNICODE");
 	FILE * RawDaysLookupFile		= _wfopen(L"RawDaysLookup.txt",			L"w, ccs=UNICODE");
 	FILE * RawSlotsLookupFile		= _wfopen(L"RawSlotsLookup.txt",		L"w, ccs=UNICODE");
@@ -2175,7 +2177,7 @@ int main(void)
 
 	FILE * ProgrammesArrayFile		= _wfopen(L"ProgrammesArray.txt",		L"w, ccs=UNICODE");
 	FILE * ExtremesFile				= _wfopen(L"Extremes.txt",				L"w, ccs=UNICODE");
-	if (!ProgrammeLookupFile || !LessonLookupFile || !LessonNameLookupFile || !CreditsLookupFile || !LinkLookupFile || !LectureTypeLookupFile || !SectionsLookupFile ||
+	if (!ProgrammeLookupFile || !LessonLookupFile || !LessonNameLookupFile || !CreditsLookupFile || !LinkLookupFile || !LectureTypeLookupFile || !SectionLookupFile ||
 		!InstructorLookupFile || !RawDaysLookupFile || !RawSlotsLookupFile || !RawClassroomsLookupFile || !ClassroomLookupFile || !ProgrammesArrayFile || !ExtremesFile)
 	{
 		fwprintf(stderr, L"%d: problem\n", __LINE__);
@@ -2206,9 +2208,9 @@ int main(void)
 	fclose(LectureTypeLookupFile);
 	LectureTypeLookupFile = NULL;
 
-	PrintLookupIntoFile(SectionsLookupFile, APSectionLookups);
-	fclose(SectionsLookupFile);
-	SectionsLookupFile = NULL;
+	PrintLookupIntoFile(SectionLookupFile, APSectionLookups);
+	fclose(SectionLookupFile);
+	SectionLookupFile = NULL;
 
 	PrintLookupIntoFile(InstructorLookupFile, APInstructorLookups);
 	fclose(InstructorLookupFile);
