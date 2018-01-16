@@ -5,8 +5,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <locale.h>
-#include <curl/curl.h>
 #include <time.h>
+
+#include "curl.h"
 
 #define BASE_LINK						L"http://registration.boun.edu.tr"
 #define SEMESTER_SELECTION_PAGE_LINK	BASE_LINK L"/schedule.htm"
@@ -23,6 +24,8 @@ typedef struct ColumnIndexLookupTag
 	size_t Days;
 	size_t Hours;
 	size_t Rooms;
+	size_t RawRequiredforDepts;
+	size_t CodeSec2;
 } ColumnIndexLookup;
 
 typedef struct MyLookupTag
@@ -75,33 +78,34 @@ typedef struct MyLectureTag
 	MyLookup * PClassroomLookup;
 } MyLecture;
 
-typedef enum MyLectureGroupStateTag
+typedef enum MySectionStateTag
 {
-	LectureGroupState_Undefined,
-	LectureGroupState_TBA,
-	LectureGroupState_Failed,
-	LectureGroupState_OnlyDays,
-	LectureGroupState_DaysandSlots,
-	LectureGroupState_Complete
-} MyLectureGroupState;
+	SectionState_Undefined,
+	SectionState_TBA,
+	SectionState_Failed,
+	SectionState_OnlyDays,
+	SectionState_DaysandSlots,
+	SectionState_Complete
+} MySectionState;
 
-typedef struct MyLectureGroupTag
+typedef struct MySectionTag
 {
 	MyLookup * PSectionLookup;
 	MyLookup * PInstructorLookup;
 	MyLookup * PRawDaysLookup;
 	MyLookup * PRawSlotsLookup;
 	MyLookup * PRawClassroomsLookup;
-	MyLectureGroupState LectureGroupState;
+	MyLookup * PRawRequiredforDeptsLookup;
+	MySectionState SectionState;
 	size_t NumberofLectures;
 	MyLecture * ALectures;
-} MyLectureGroup;
+} MySection;
 
-typedef struct MyLectureGroupTypeTag
+typedef struct MyBonusTag
 {
-	MyLookup * PLectureTypeLookup;
-	MyLectureGroup ** APLectureGroups;
-} MyLectureType;
+	MyLookup * PBonusTypeLookup;
+	MySection ** APSections;
+} MyBonus;
 
 typedef struct MyLessonTag
 {
@@ -109,7 +113,8 @@ typedef struct MyLessonTag
 	MyLookup * PLessonNameLookup;
 	MyLookup * PCreditsLookup;
 	MyLookup * PLinkLookup;
-	MyLectureType ** APLectureTypes;
+	MySection ** APMainSections;
+	MyBonus ** APBonuses;
 } MyLesson;
 
 typedef struct MyProgrammeTag
@@ -123,12 +128,13 @@ MyLookup ** APLessonLookups = NULL;
 MyLookup ** APLessonNameLookups = NULL;
 MyLookup ** APCreditsLookups = NULL;
 MyLookup ** APLinkLookups = NULL;
-MyLookup ** APLectureTypeLookups = NULL;
+MyLookup ** APBonusTypeLookups = NULL;
 MyLookup ** APSectionLookups = NULL;
 MyLookup ** APInstructorLookups = NULL;
 MyLookup ** APRawDaysLookups = NULL;
 MyLookup ** APRawSlotsLookups = NULL;
 MyLookup ** APRawClassroomsLookups = NULL;
+MyLookup ** APRawRequiredforDeptsLookups = NULL;
 MyLookup ** APClassroomLookups = NULL;
 
 MyProgramme ** APProgrammes = NULL;
@@ -251,51 +257,52 @@ const wchar_t * MatchFromLeftToRight(const wchar_t * const SourceStart, const wc
 	return *PMatchEnd + wcslen(RightLimitwcs);
 }
 
-void InitializeLectureGroup(MyLectureGroup * const PLectureGroup)
+void InitializeSection(MySection * const PSection)
 {
-	PLectureGroup->PSectionLookup = APSectionLookups[0];
-	PLectureGroup->PInstructorLookup = APInstructorLookups[0];
-	PLectureGroup->LectureGroupState = LectureGroupState_Undefined;
-	PLectureGroup->PRawDaysLookup = APRawDaysLookups[0];
-	PLectureGroup->PRawSlotsLookup = APRawSlotsLookups[0];
-	PLectureGroup->PRawClassroomsLookup = APRawClassroomsLookups[0];
-	PLectureGroup->NumberofLectures = 0U;
-	PLectureGroup->ALectures = NULL;
+	PSection->PSectionLookup = APSectionLookups[0];
+	PSection->PInstructorLookup = APInstructorLookups[0];
+	PSection->SectionState = SectionState_Undefined;
+	PSection->PRawDaysLookup = APRawDaysLookups[0];
+	PSection->PRawSlotsLookup = APRawSlotsLookups[0];
+	PSection->PRawClassroomsLookup = APRawClassroomsLookups[0];
+	PSection->PRawRequiredforDeptsLookup = APRawRequiredforDeptsLookups[0];
+	PSection->NumberofLectures = 0U;
+	PSection->ALectures = NULL;
 }
 
-MyLectureGroup * OneMoreLectureGroup(MyLectureGroup *** const PAPLectureGroups)
+MySection * OneMoreSection(MySection *** const PAPSections)
 {
 	size_t size = 0;
-	while ((*PAPLectureGroups)[size] != NULL)
+	while ((*PAPSections)[size] != NULL)
 		size++;
 
-	(*PAPLectureGroups) = realloc((*PAPLectureGroups), (size + 2) * sizeof * (*PAPLectureGroups));
-	if ((*PAPLectureGroups) == NULL)
+	(*PAPSections) = realloc((*PAPSections), (size + 2) * sizeof * (*PAPSections));
+	if ((*PAPSections) == NULL)
 	{
 		fwprintf(stderr, L"%d: allocation failure\n", __LINE__);
 		exit(EXIT_FAILURE);
 	}
 
-	(*PAPLectureGroups)[size] = malloc(sizeof * (*PAPLectureGroups)[size]);
-	if ((*PAPLectureGroups)[size] == NULL)
+	(*PAPSections)[size] = malloc(sizeof * (*PAPSections)[size]);
+	if ((*PAPSections)[size] == NULL)
 	{
 		fwprintf(stderr, L"%d: allocation failure\n", __LINE__);
 		exit(EXIT_FAILURE);
 	}
 
-	(*PAPLectureGroups)[size + 1] = NULL;
+	(*PAPSections)[size + 1] = NULL;
 
-	InitializeLectureGroup((*PAPLectureGroups)[size]);
+	InitializeSection((*PAPSections)[size]);
 
-	return (*PAPLectureGroups)[size];
+	return (*PAPSections)[size];
 }
 
-void InitializeLectureType(MyLectureType * const PLectureType)
+void InitializeLectureType(MyBonus * const PBonus)
 {
-	PLectureType->PLectureTypeLookup = APLectureTypeLookups[0];
+	PBonus->PBonusTypeLookup = APBonusTypeLookups[0];
 
-	PLectureType->APLectureGroups = malloc(sizeof * PLectureType->APLectureGroups);
-	PLectureType->APLectureGroups[0] = NULL;
+	PBonus->APSections = malloc(sizeof * PBonus->APSections);
+	PBonus->APSections[0] = NULL;
 }
 
 void InitializeLesson(MyLesson * const PLesson)
@@ -305,16 +312,11 @@ void InitializeLesson(MyLesson * const PLesson)
 	PLesson->PCreditsLookup = APCreditsLookups[0];
 	PLesson->PLinkLookup = APLinkLookups[0];
 
-	// allocate two space for two pointers, first to be filled with a pointer to space for a MyLectureType
-	PLesson->APLectureTypes = malloc(2 * sizeof * PLesson->APLectureTypes);
-	PLesson->APLectureTypes[1] = NULL;
+	PLesson->APMainSections = malloc(sizeof * PLesson->APMainSections);
+	PLesson->APMainSections[0] = NULL;
 
-	// fetch a MyLectureType and initialize (a MyLesson will definitely have one)
-	PLesson->APLectureTypes[0] = malloc(sizeof * PLesson->APLectureTypes[0]);
-	InitializeLectureType(PLesson->APLectureTypes[0]);
-
-	// since this is the very first Lecture Type of the Lesson, it will be of type (main)
-	PLesson->APLectureTypes[0]->PLectureTypeLookup = APLectureTypeLookups[1];
+	PLesson->APBonuses = malloc(sizeof * PLesson->APBonuses);
+	PLesson->APBonuses[0] = NULL;
 }
 
 void InitializeProgramme(MyProgramme * const PProgramme)
@@ -383,35 +385,35 @@ MyLookup * FindTheLookup(const wchar_t * const TheEntry_start, const wchar_t * c
 	return (*PAPLookup)[size];
 }
 
-MyLectureType * FindTheLectureType(const wchar_t * const Start, const wchar_t * const End, MyLectureType *** const PAPLectureTypes)
+MyBonus * FindTheBonus(const wchar_t * const Start, const wchar_t * const End, MyBonus *** const PAPBonuses)
 {
 	size_t size = 0;
-	MyLookup * PLectureTypeLookup = FindTheLookup(Start, End, &APLectureTypeLookups);
+	MyLookup * PLectureTypeLookup = FindTheLookup(Start, End, &APBonusTypeLookups);
 
-	for (; (*PAPLectureTypes)[size] != NULL; size++)
-		if ((*PAPLectureTypes)[size]->PLectureTypeLookup == PLectureTypeLookup)
-			return (*PAPLectureTypes)[size];
+	for (; (*PAPBonuses)[size] != NULL; size++)
+		if ((*PAPBonuses)[size]->PBonusTypeLookup == PLectureTypeLookup)
+			return (*PAPBonuses)[size];
 
-	(*PAPLectureTypes) = realloc((*PAPLectureTypes), (size + 2) * sizeof * (*PAPLectureTypes));
-	if ((*PAPLectureTypes) == NULL)
+	(*PAPBonuses) = realloc((*PAPBonuses), (size + 2) * sizeof * (*PAPBonuses));
+	if ((*PAPBonuses) == NULL)
 	{
 		fwprintf(stderr, L"%d: allocation failure\n", __LINE__);
 		exit(EXIT_FAILURE);
 	}
 
-	(*PAPLectureTypes)[size] = malloc(sizeof * (*PAPLectureTypes)[size]);
-	if ((*PAPLectureTypes)[size] == NULL)
+	(*PAPBonuses)[size] = malloc(sizeof * (*PAPBonuses)[size]);
+	if ((*PAPBonuses)[size] == NULL)
 	{
 		fwprintf(stderr, L"%d: allocation failure\n", __LINE__);
 		exit(EXIT_FAILURE);
 	}
 
-	(*PAPLectureTypes)[size] = malloc(sizeof * (*PAPLectureTypes)[size]);
-	InitializeLectureType((*PAPLectureTypes)[size]);
-	(*PAPLectureTypes)[size]->PLectureTypeLookup = PLectureTypeLookup;
+	(*PAPBonuses)[size] = malloc(sizeof * (*PAPBonuses)[size]);
+	InitializeLectureType((*PAPBonuses)[size]);
+	(*PAPBonuses)[size]->PBonusTypeLookup = PLectureTypeLookup;
 
-	(*PAPLectureTypes)[size + 1] = NULL;
-	return (*PAPLectureTypes)[size];
+	(*PAPBonuses)[size + 1] = NULL;
+	return (*PAPBonuses)[size];
 }
 
 MyLesson * FindTheLesson(const wchar_t * const Start, const wchar_t * const End, MyLesson *** const PAPLessons)
@@ -516,9 +518,9 @@ PhraseMatchInAmbiguity FindMatchInAmbiguity(const wchar_t * start, size_t Ambigu
 	return result;
 }
 
-void EvaluateRawClassrooms(MyLectureGroup * const PLectureGroup)
+void EvaluateRawClassrooms(MySection * const PSection)
 {
-	const wchar_t * start = PLectureGroup->PRawClassroomsLookup->Entry;
+	const wchar_t * start = PSection->PRawClassroomsLookup->Entry;
 
 	size_t AtMost = 0U;
 	size_t AtLeast = 0U;
@@ -598,7 +600,7 @@ void EvaluateRawClassrooms(MyLectureGroup * const PLectureGroup)
 
 		if (!NumberofCharacters && (!NumberofNumbers || NumberofDots))
 		{
-			fwprintf(stderr, L"%d: encountered a nonconsidered pattern for a room name in (%ls)\n", __LINE__, PLectureGroup->PRawClassroomsLookup->Entry);
+			fwprintf(stderr, L"%d: encountered a nonconsidered pattern for a room name in (%ls)\n", __LINE__, PSection->PRawClassroomsLookup->Entry);
 			return;
 		}
 		else if (!NumberofDots && !NumberofNumbers)
@@ -617,7 +619,7 @@ void EvaluateRawClassrooms(MyLectureGroup * const PLectureGroup)
 				}
 				else
 				{
-					fwprintf(stderr, L"%d: encountered a nonconsidered sequence for a room name in (%ls)\n", __LINE__, PLectureGroup->PRawClassroomsLookup->Entry);
+					fwprintf(stderr, L"%d: encountered a nonconsidered sequence for a room name in (%ls)\n", __LINE__, PSection->PRawClassroomsLookup->Entry);
 					return;
 				}
 			}
@@ -668,9 +670,9 @@ void EvaluateRawClassrooms(MyLectureGroup * const PLectureGroup)
 	NumberofDots = 0;
 	NumberofNumbers = 0;
 
-	if (AtMost == PLectureGroup->NumberofLectures)
+	if (AtMost == PSection->NumberofLectures)
 	{
-		MyLecture * PLecture = PLectureGroup->ALectures;
+		MyLecture * PLecture = PSection->ALectures;
 		const wchar_t * helperess = NULL;
 
 		for (const wchar_t * helper = start; helper[0];)
@@ -760,15 +762,15 @@ void EvaluateRawClassrooms(MyLectureGroup * const PLectureGroup)
 				start++;
 			}
 		}
-		PLectureGroup->LectureGroupState = LectureGroupState_Complete;
+		PSection->SectionState = SectionState_Complete;
 		return;
 	}
 
-	if (AtLeast == PLectureGroup->NumberofLectures)
+	if (AtLeast == PSection->NumberofLectures)
 	{
 		if (!Ambiguity)
 		{
-			MyLecture * PLecture = PLectureGroup->ALectures;
+			MyLecture * PLecture = PSection->ALectures;
 			const wchar_t * helperess = NULL;
 			const wchar_t * helpjester = NULL;
 
@@ -916,7 +918,7 @@ void EvaluateRawClassrooms(MyLectureGroup * const PLectureGroup)
 				}
 			}
 
-			PLectureGroup->LectureGroupState = LectureGroupState_Complete;
+			PSection->SectionState = SectionState_Complete;
 			return;
 		}
 		else
@@ -925,7 +927,7 @@ void EvaluateRawClassrooms(MyLectureGroup * const PLectureGroup)
 			// using the data about classrooms we have thus far
 			Ambiguity = 0;
 			NumberofFreeCoupleables = 0;
-			MyLecture * PLecture = PLectureGroup->ALectures;
+			MyLecture * PLecture = PSection->ALectures;
 			const wchar_t * helper;
 			
 			for (helper = start; helper[0];)
@@ -1154,14 +1156,14 @@ void EvaluateRawClassrooms(MyLectureGroup * const PLectureGroup)
 				}
 				NumberofFreeCoupleables = 0;
 			}
-			PLectureGroup->LectureGroupState = LectureGroupState_Complete;
+			PSection->SectionState = SectionState_Complete;
 		}
 	}
 }
 
-void EvaluateRawSlots(MyLectureGroup * const PLectureGroup)
+void EvaluateRawSlots(MySection * const PSection)
 {
-	const wchar_t * start = PLectureGroup->PRawSlotsLookup->Entry;
+	const wchar_t * start = PSection->PRawSlotsLookup->Entry;
 	const size_t RawSlotsLength = wcslen(start);
 
 	size_t AtMost = RawSlotsLength;
@@ -1185,22 +1187,22 @@ void EvaluateRawSlots(MyLectureGroup * const PLectureGroup)
 			}
 		}
 	}
-	if (AtMost == PLectureGroup->NumberofLectures)
+	if (AtMost == PSection->NumberofLectures)
 	{
 		for (size_t i = 0; i < AtMost; i++)
 		{
 			if (start[0] == L'1' && start[1] == L'0')
 			{
-				PLectureGroup->ALectures[i].Slot = 10;
+				PSection->ALectures[i].Slot = 10;
 				start += 2;
 			}
 			else
 			{
-				PLectureGroup->ALectures[i].Slot = start[0] - L'0';
+				PSection->ALectures[i].Slot = start[0] - L'0';
 				start++;
 			}
 		}
-		PLectureGroup->LectureGroupState = LectureGroupState_DaysandSlots;
+		PSection->SectionState = SectionState_DaysandSlots;
 		return;
 	}
 
@@ -1233,7 +1235,7 @@ void EvaluateRawSlots(MyLectureGroup * const PLectureGroup)
 
 		AtLeast += NumberofFreeCoupleables / 2 + NumberofFreeCoupleables % 2;
 	}
-	if (AtLeast == PLectureGroup->NumberofLectures)
+	if (AtLeast == PSection->NumberofLectures)
 	{
 		for (size_t i = 0U; i < AtLeast; i++)
 		{
@@ -1241,70 +1243,70 @@ void EvaluateRawSlots(MyLectureGroup * const PLectureGroup)
 			{
 				if (start[1] == L'1' && start[2] == L'0')
 				{
-					PLectureGroup->ALectures[i].Slot = 1U;
+					PSection->ALectures[i].Slot = 1U;
 					i++;
-					PLectureGroup->ALectures[i].Slot = 10U;
+					PSection->ALectures[i].Slot = 10U;
 					start += 3;
 				}
 				else
 				{
-					PLectureGroup->ALectures[i].Slot = 10U + start[1] - L'0';
+					PSection->ALectures[i].Slot = 10U + start[1] - L'0';
 					start += 2;
 				}
 			}
 			else
 			{
-				PLectureGroup->ALectures[i].Slot = start[0] - L'0';
+				PSection->ALectures[i].Slot = start[0] - L'0';
 				start++;
 			}
 		}
-		PLectureGroup->LectureGroupState = LectureGroupState_DaysandSlots;
+		PSection->SectionState = SectionState_DaysandSlots;
 		return;
 	}
 }
 
-void EvaluateRawDays(MyLectureGroup * const PLectureGroup)
+void EvaluateRawDays(MySection * const PSection)
 {
-	for (const wchar_t * helper = PLectureGroup->PRawDaysLookup->Entry; *helper; helper++)
+	for (const wchar_t * helper = PSection->PRawDaysLookup->Entry; *helper; helper++)
 	{
 		switch (*helper)
 		{
 			case L'M':
 			case L'W':
 			case L'F':
-				PLectureGroup->NumberofLectures++;
+				PSection->NumberofLectures++;
 				break;
 			case L'T':
 				if (helper[1] == L'h' || helper[1] == L'H')
 				{
 					helper++;
 				}
-				PLectureGroup->NumberofLectures++;
+				PSection->NumberofLectures++;
 				break;
 			case L'S':
 				if (helper[1] == L't' || helper[1] == L'T')
 				{
 					helper++;
 				}
-				PLectureGroup->NumberofLectures++;
+				PSection->NumberofLectures++;
 				break;
 			default:
-				PLectureGroup->LectureGroupState = LectureGroupState_Failed;
+				PSection->SectionState = SectionState_Failed;
 				return;
 		}
 	}
 
 	// allocate array of lectures, initialize Slots and Classrooms with zeroes
-	PLectureGroup->ALectures = realloc(PLectureGroup->ALectures, PLectureGroup->NumberofLectures * sizeof * PLectureGroup->ALectures);
-	for (size_t i = 0; i < PLectureGroup->NumberofLectures; i++)
+	PSection->ALectures = realloc(PSection->ALectures, PSection->NumberofLectures * sizeof * PSection->ALectures);
+	for (size_t i = 0; i < PSection->NumberofLectures; i++)
 	{
-		PLectureGroup->ALectures[i].Slot = 0U;
-		PLectureGroup->ALectures[i].PClassroomLookup = APClassroomLookups[0];
+		PSection->ALectures[i].Slot = 0U;
+		PSection->ALectures[i].PClassroomLookup = APClassroomLookups[0];
 	}
 
-	MyLecture * PLecture = PLectureGroup->ALectures;
+	MyLecture * PLecture = PSection->ALectures;
 
-	for (const wchar_t * helper = PLectureGroup->PRawDaysLookup->Entry; *helper; helper++, PLecture++)
+	for (const wchar_t * helper = PSection->PRawDaysLookup->Entry; *helper; helper++, PLecture++)
 	{
 		switch (*helper)
 		{
@@ -1342,16 +1344,46 @@ void EvaluateRawDays(MyLectureGroup * const PLectureGroup)
 		}
 	}
 
-	PLectureGroup->LectureGroupState = LectureGroupState_OnlyDays;
+	PSection->SectionState = SectionState_OnlyDays;
 }
 
-size_t FindCellIndexWithinRow(const wchar_t * RowStart, const wchar_t * RowEnd, const wchar_t * const Matchwcs)
+const wchar_t * OrdinalSuffix(size_t Decimal)
 {
+	switch (Decimal % 10)
+	{
+		case 1:
+			return L"st";
+		case 2:
+			return L"nd";
+		case 3:
+			return L"rd";
+		default:
+			return L"th";
+	}
+}
+
+size_t FindCellIndexWithinRow(const wchar_t * RowStart, const wchar_t * RowEnd, const wchar_t * const Matchwcs, size_t NthOccurrence)
+{
+	if (NthOccurrence == 0)
+	{
+		return 0;
+	}
+
 	const wchar_t * MatchStart = wcsstr(RowStart, Matchwcs);
 	if (MatchStart == NULL || MatchStart > RowEnd)
 	{
 		fwprintf(stderr, L"%d: no such string (%ls) within row\n", __LINE__, Matchwcs);
 		return 0;
+	}
+
+	for (size_t i = 1; i != NthOccurrence; i++)
+	{
+		MatchStart = wcsstr(MatchStart + 1, Matchwcs);
+		if (MatchStart == NULL || MatchStart > RowEnd)
+		{
+			fwprintf(stderr, L"%d: no %u%ls occurrence of string (%ls) within row\n", __LINE__, NthOccurrence, OrdinalSuffix(NthOccurrence), Matchwcs);
+			return 0;
+		}
 	}
 
 	// no need to be too excessive, we will assume
@@ -1377,130 +1409,155 @@ void PrintLookupIntoFile(FILE * const LookupFile, const MyLookup * const * PFirs
 	}
 }
 
-/*
-typedef struct MyLookupTag
-{
-	wchar_t * Entry;
-	size_t OrderedIndex;
-} MyLookup;
-
-typedef enum
-{
-	Monday = 1,
-	Tuesday,
-	Wednesday,
-	Thursday,
-	Friday,
-	Saturday,
-	Sunday
-} DAYS;
-
-typedef struct MyLectureTag
-{
-	DAYS Day;
-	unsigned int Slot;
-	MyLookup * PClassroomLookup;
-} MyLecture;
-
-typedef enum MyLectureGroupStateTag
-{
-	LectureGroupState_Undefined,
-	LectureGroupState_TBA,
-	LectureGroupState_Failed,
-	LectureGroupState_OnlyDays,
-	LectureGroupState_DaysandSlots,
-	LectureGroupState_Complete
-} MyLectureGroupState;
-
-typedef struct MyLectureGroupTag
-{
-	MyLookup * PSectionLookup;
-	MyLookup * PInstructorLookup;
-	MyLookup * PRawDaysLookup;
-	MyLookup * PRawSlotsLookup;
-	MyLookup * PRawClassroomsLookup;
-	MyLectureGroupState LectureGroupState;
-	size_t NumberofLectures;
-	MyLecture * ALectures;
-} MyLectureGroup;
-
-typedef struct MyLectureGroupTypeTag
-{
-	MyLookup * PLectureTypeLookup;
-	MyLectureGroup ** APLectureGroups;
-} MyLectureType;
-
-typedef struct MyLessonTag
-{
-	MyLookup * PLessonLookup;
-	MyLookup * PLessonNameLookup;
-	MyLookup * PCreditsLookup;
-	MyLookup * PLinkLookup;
-	MyLectureType ** APLectureTypes;
-} MyLesson;
-
-typedef struct MyProgrammeTag
-{
-	MyLookup * PProgrammeLookup;
-	MyLesson ** APLessons;
-} MyProgramme;
-*/
-
 void PrintProgrammesIntoFile(FILE * const ProgrammesFile)
 {
 	/*
-	|1 a1 ProgrammeLookupIndex
-	   b1 c1 LessonLookupIndex c2 LessonNameLookupIndex c3 CreditsLookupIndex c4 LinkLookupIndex
-	      d1 e1 LectureTypeLookupIndex
-		     f1 g1 SectionLookupIndex g2 InstructorLookupIndex g3 RawDaysLookupIndex g4 RawSlotsLookupIndex g5 RawClassroomsLookupIndex g6 LectureGroupState
-		        h1 i1 Day i2 Slot i3 ClassroomLookupIndex
-	
-	#1: |
-	#2: a
-	#3: b
-	#4: c
-	#5: d
-	#6: e
-	#7: f
-	#8: g
-	#9: h
-	#10:i
+	Programme (|):
+		0...:
+			0: ProgrammeLookupIndex
+			a
+			1: Lesson (b):
+				0...:
+					0: LessonLookupIndex
+					c
+					1: LessonNameLookupIndex
+					c
+					2: CreditsLookupIndex
+					c
+					3: LinkLookupIndex
+					c
+					4: Main Section (d):
+						0...:
+							0: SectionLookupIndex
+							e
+							1: InstructorLookupIndex
+							e
+							2: RawDaysLookupIndex
+							e
+							3: RawSlotsLookupIndex
+							e
+							4: RawClassroomsLookupIndex
+							e
+							5: RawRequiredforDeptsLookupIndex
+							e
+							6: SectionState
+							e
+							7: Lecture (f):
+								0...:
+									0: Day
+									g
+									1: Slot
+									g
+									2: ClassroomLookupIndex
+						c
+						5: Bonuses (d):
+							0...:
+								0: BonusTypeLookupIndex
+								e
+								1: Bonus Section (f):
+									0...:
+										0: SectionLookupIndex
+										g
+										1: InstructorLookupIndex
+										g
+										2: RawDaysLookupIndex
+										g
+										3: RawSlotsLookupIndex
+										g
+										4: RawClassroomsLookupIndex
+										g
+										5: RawRequiredforDeptsLookupIndex
+										g
+										6: SectionState
+										g
+										7: Lecture (h):
+											0...:
+												0: Day
+												i
+												1: Slot
+												i
+												2: ClassroomLookupIndex
 	*/
-	for (const MyProgramme * const * PFirstProgrammeP = APProgrammes; *PFirstProgrammeP; PFirstProgrammeP++)
+
 	{
-		fwprintf(ProgrammesFile, L"|a%u",
-				 (*PFirstProgrammeP)->PProgrammeLookup->OrderedIndex
-				 );
-		for (const MyLesson * const * PFirstLessonP = (*PFirstProgrammeP)->APLessons; *PFirstLessonP; PFirstLessonP++)
+		int FirstinArray = 1;
+		for (const MyProgramme * const * PFirstProgrammeP = APProgrammes; *PFirstProgrammeP; PFirstProgrammeP++, FirstinArray = 0)
 		{
-			fwprintf(ProgrammesFile, L"bc%uc%uc%uc%u",
-					 (*PFirstLessonP)->PLessonLookup->OrderedIndex,
-					 (*PFirstLessonP)->PLessonNameLookup->OrderedIndex,
-					 (*PFirstLessonP)->PCreditsLookup->OrderedIndex,
-					 (*PFirstLessonP)->PLinkLookup->OrderedIndex
+			fwprintf(ProgrammesFile, FirstinArray ? L"%ua" : L"|%ua",
+					 (*PFirstProgrammeP)->PProgrammeLookup->OrderedIndex
 					 );
-			for (const MyLectureType * const * PFirstLectureTypeP = (*PFirstLessonP)->APLectureTypes; *PFirstLectureTypeP; PFirstLectureTypeP++)
+
 			{
-				fwprintf(ProgrammesFile, L"de%u",
-						 (*PFirstLectureTypeP)->PLectureTypeLookup->OrderedIndex // 1 has a special meaning, indicates (main)
-						 );
-				for (const MyLectureGroup * const * PFirstLectureGroupP = (*PFirstLectureTypeP)->APLectureGroups; *PFirstLectureGroupP; PFirstLectureGroupP++)
+				int FirstinArray = 1;
+				for (const MyLesson * const * PFirstLessonP = (*PFirstProgrammeP)->APLessons; *PFirstLessonP; PFirstLessonP++, FirstinArray = 0)
 				{
-					fwprintf(ProgrammesFile, L"fg%ug%ug%ug%ug%ug%u",
-							 (*PFirstLectureGroupP)->PSectionLookup->OrderedIndex,
-							 (*PFirstLectureGroupP)->PInstructorLookup->OrderedIndex,
-							 (*PFirstLectureGroupP)->PRawDaysLookup->OrderedIndex,
-							 (*PFirstLectureGroupP)->PRawSlotsLookup->OrderedIndex,
-							 (*PFirstLectureGroupP)->PRawClassroomsLookup->OrderedIndex,
-							 (*PFirstLectureGroupP)->LectureGroupState
+					fwprintf(ProgrammesFile, FirstinArray ? L"%uc%uc%uc%uc" : L"b%uc%uc%uc%uc",
+							 (*PFirstLessonP)->PLessonLookup->OrderedIndex,
+							 (*PFirstLessonP)->PLessonNameLookup->OrderedIndex,
+							 (*PFirstLessonP)->PCreditsLookup->OrderedIndex,
+							 (*PFirstLessonP)->PLinkLookup->OrderedIndex
 							 );
-					for (size_t LectureIndex = 0; LectureIndex < (*PFirstLectureGroupP)->NumberofLectures; LectureIndex++)
+
 					{
-						fwprintf(ProgrammesFile, L"hi%ui%ui%u",
-								 (*PFirstLectureGroupP)->ALectures[LectureIndex].Day,
-								 (*PFirstLectureGroupP)->ALectures[LectureIndex].Slot,
-								 (*PFirstLectureGroupP)->ALectures[LectureIndex].PClassroomLookup->OrderedIndex
-								 );
+						int FirstinArray = 1;
+						for (const MySection * const * PFirstMainSectionP = (*PFirstLessonP)->APMainSections; *PFirstMainSectionP; PFirstMainSectionP++, FirstinArray = 0)
+						{
+							fwprintf(ProgrammesFile, FirstinArray ? L"%ue%ue%ue%ue%ue%ue%ue" : L"d%ue%ue%ue%ue%ue%ue%ue",
+									 (*PFirstMainSectionP)->PSectionLookup->OrderedIndex,
+									 (*PFirstMainSectionP)->PInstructorLookup->OrderedIndex,
+									 (*PFirstMainSectionP)->PRawDaysLookup->OrderedIndex,
+									 (*PFirstMainSectionP)->PRawSlotsLookup->OrderedIndex,
+									 (*PFirstMainSectionP)->PRawClassroomsLookup->OrderedIndex,
+									 (*PFirstMainSectionP)->PRawRequiredforDeptsLookup->OrderedIndex,
+									 (unsigned int) (*PFirstMainSectionP)->SectionState
+									 );
+
+							for (size_t LectureIndex = 0; LectureIndex < (*PFirstMainSectionP)->NumberofLectures; LectureIndex++)
+							{
+								fwprintf(ProgrammesFile, (LectureIndex == 0) ? L"%ug%ug%u" : L"f%ug%ug%u",
+										 (*PFirstMainSectionP)->ALectures[LectureIndex].Day,
+										 (*PFirstMainSectionP)->ALectures[LectureIndex].Slot,
+										 (*PFirstMainSectionP)->ALectures[LectureIndex].PClassroomLookup->OrderedIndex
+										 );
+							}
+						}
+					}
+
+					fwprintf(ProgrammesFile, L"c");
+
+					{
+						int FirstinArray = 1;
+						for (const MyBonus * const * PFirstBonusP = (*PFirstLessonP)->APBonuses; *PFirstBonusP; PFirstBonusP++, FirstinArray = 0)
+						{
+							fwprintf(ProgrammesFile, FirstinArray ? L"%ue" : L"d%ue",
+									 (*PFirstBonusP)->PBonusTypeLookup->OrderedIndex
+									 );
+
+							{
+								int FirstinArray = 1;
+								for (const MySection * const * PFirstSectionP = (*PFirstBonusP)->APSections; *PFirstSectionP; PFirstSectionP++, FirstinArray = 0)
+								{
+									fwprintf(ProgrammesFile, FirstinArray ? L"%ug%ug%ug%ug%ug%ug%ug" : L"f%ug%ug%ug%ug%ug%ug%ug",
+											 (*PFirstSectionP)->PSectionLookup->OrderedIndex,
+											 (*PFirstSectionP)->PInstructorLookup->OrderedIndex,
+											 (*PFirstSectionP)->PRawDaysLookup->OrderedIndex,
+											 (*PFirstSectionP)->PRawSlotsLookup->OrderedIndex,
+											 (*PFirstSectionP)->PRawClassroomsLookup->OrderedIndex,
+											 (*PFirstSectionP)->PRawRequiredforDeptsLookup->OrderedIndex,
+											 (unsigned int) (*PFirstSectionP)->SectionState
+											 );
+
+									for (size_t LectureIndex = 0; LectureIndex < (*PFirstSectionP)->NumberofLectures; LectureIndex++)
+									{
+										fwprintf(ProgrammesFile, (LectureIndex == 0) ? L"%ui%ui%u" : L"h%ui%ui%u",
+												 (*PFirstSectionP)->ALectures[LectureIndex].Day,
+												 (*PFirstSectionP)->ALectures[LectureIndex].Slot,
+												 (*PFirstSectionP)->ALectures[LectureIndex].PClassroomLookup->OrderedIndex
+												 );
+									}
+								}
+							}
+						}
 					}
 				}
 			}
@@ -1562,17 +1619,25 @@ void InterpretDepartmentPage(const MemoryStruct * const data, MyLookup * const P
 	RowEnd = wcsstr(RowStart, L"</tr>");
 	if (RowEnd == NULL)
 	{
-		fwprintf(stderr, L"%d: title missed ending tag in %ls\n", __LINE__, PLinkLookup->Entry);
+		fwprintf(stderr, L"%d: title row missed ending tag in %ls\n", __LINE__, PLinkLookup->Entry);
 		return;
 	}
 	ColumnIndexLookup columnindexlookup;
-	columnindexlookup.CodeSec	= FindCellIndexWithinRow(RowStart, RowEnd, L"Code.Sec");
-	columnindexlookup.Name		= FindCellIndexWithinRow(RowStart, RowEnd, L"Name");
-	columnindexlookup.Cr		= FindCellIndexWithinRow(RowStart, RowEnd, L"Cr.");
-	columnindexlookup.Instr		= FindCellIndexWithinRow(RowStart, RowEnd, L"Instr.");
-	columnindexlookup.Days		= FindCellIndexWithinRow(RowStart, RowEnd, L"Days");
-	columnindexlookup.Hours		= FindCellIndexWithinRow(RowStart, RowEnd, L"Hours");
-	columnindexlookup.Rooms		= FindCellIndexWithinRow(RowStart, RowEnd, L"Rooms");
+	columnindexlookup.CodeSec	= FindCellIndexWithinRow(RowStart, RowEnd, L"Code.Sec", 1U);
+	columnindexlookup.Name		= FindCellIndexWithinRow(RowStart, RowEnd, L"Name", 1U);
+	columnindexlookup.Cr		= FindCellIndexWithinRow(RowStart, RowEnd, L"Cr.", 1U);
+	columnindexlookup.Instr		= FindCellIndexWithinRow(RowStart, RowEnd, L"Instr.", 1U);
+	columnindexlookup.Days		= FindCellIndexWithinRow(RowStart, RowEnd, L"Days", 1U);
+	columnindexlookup.Hours		= FindCellIndexWithinRow(RowStart, RowEnd, L"Hours", 1U);
+	columnindexlookup.Rooms		= FindCellIndexWithinRow(RowStart, RowEnd, L"Rooms", 1U);
+	columnindexlookup.RawRequiredforDepts = FindCellIndexWithinRow(RowStart, RowEnd, L"Required for Dept.", 1U);
+	columnindexlookup.CodeSec2	= FindCellIndexWithinRow(RowStart, RowEnd, L"Code.Sec", 2U);
+
+	if (columnindexlookup.CodeSec == 0 || columnindexlookup.Name == 0 || columnindexlookup.Cr == 0 || columnindexlookup.Instr == 0 || columnindexlookup.Days == 0 || columnindexlookup.Hours == 0 || columnindexlookup.Rooms == 0 || columnindexlookup.CodeSec2 == 0)
+	{
+		fwprintf(stderr, L"%d: title row misses at least one of the required cells\n", __LINE__);
+		return;
+	}
 
 	MyProgramme * PProgramme = NULL;
 	MyLesson * PLesson = NULL;
@@ -1587,72 +1652,75 @@ void InterpretDepartmentPage(const MemoryStruct * const data, MyLookup * const P
 			return;
 		}
 
+		// Code.Sec2 cell
+		if (!MatchCellContents(RowStart, RowEnd, columnindexlookup.CodeSec2, &CellStart, &CellEnd))
+		{
+			fwprintf(stderr, L"%d: problem\n", __LINE__);
+			exit(EXIT_FAILURE);
+		}
+
+		helper = CellStart;
+		while (iswalpha(helper[0]))
+		{
+			if (++helper >= CellEnd)
+			{
+				fwprintf(stderr, L"%d: Code.Sec2 cell ended too soon\n", __LINE__);
+				exit(EXIT_FAILURE);
+			}
+		}
+		PProgramme = FindTheProgramme(CellStart, helper);
+
+		while (helper[0] == L' ')
+		{
+			if (++helper >= CellEnd)
+			{
+				fwprintf(stderr, L"%d: Code.Sec2 cell ended too soon\n", __LINE__);
+				exit(EXIT_FAILURE);
+			}
+		}
+		CellStart = helper;
+		while (helper[0] != L'.')
+		{
+			if (++helper >= CellEnd)
+			{
+				fwprintf(stderr, L"%d: Code.Sec2 cell ended too soon\n", __LINE__);
+				exit(EXIT_FAILURE);
+			}
+		}
+		PLesson = FindTheLesson(CellStart, helper, &PProgramme->APLessons);
+
+		helper++;
+		if (helper >= CellEnd)
+		{
+			fwprintf(stderr, L"%d: Code.Sec2 cell ended too soon\n", __LINE__);
+			exit(EXIT_FAILURE);
+		}
+		PSectionLookup = FindTheLookup(helper, CellEnd, &APSectionLookups);
+		
 		// Code.Sec cell
 		if (!MatchCellContents(RowStart, RowEnd, columnindexlookup.CodeSec, &CellStart, &CellEnd))
 		{
 			fwprintf(stderr, L"%d: problem\n", __LINE__);
 			exit(EXIT_FAILURE);
 		}
-		
-		MyLectureType * PLectureType = NULL;
-		MyLectureGroup * PLectureGroup = NULL;
 
-		if (CellStart == CellEnd)	// means that it is a sublesson (ps, lab, etc.)
+		MyBonus * PBonus = NULL;
+		MySection * PSection = NULL;
+
+		if (CellStart == CellEnd)	// means that it is a bonus (ps, lab, etc.)
 		{
-			if (PProgramme == NULL)
-			{
-				fwprintf(stderr, L"%d: problem\n", __LINE__);
-				exit(EXIT_FAILURE);
-			}
-
 			// Name cell
 			if (!MatchCellContents(RowStart, RowEnd, columnindexlookup.Name, &CellStart, &CellEnd))
 			{
 				fwprintf(stderr, L"%d: problem\n", __LINE__);
 				exit(EXIT_FAILURE);
 			}
-			PLectureType = FindTheLectureType(CellStart, CellEnd, &PLesson->APLectureTypes);
+			
+			PBonus = FindTheBonus(CellStart, CellEnd, &PLesson->APBonuses);
+			PSection = OneMoreSection(&PBonus->APSections);
 		}
 		else
 		{
-			helper = CellStart;
-			while (iswalpha(helper[0]))
-			{
-				if (++helper >= CellEnd)
-				{
-					fwprintf(stderr, L"%d: Code.Sec cell ended too soon\n", __LINE__);
-					exit(EXIT_FAILURE);
-				}
-			}
-			PProgramme = FindTheProgramme(CellStart, helper);
-
-			while (helper[0] == L' ')
-			{
-				if (++helper >= CellEnd)
-				{
-					fwprintf(stderr, L"%d: Code.Sec cell ended too soon\n", __LINE__);
-					exit(EXIT_FAILURE);
-				}
-			}
-			CellStart = helper;
-			while (helper[0] != L'.')
-			{
-				if (++helper >= CellEnd)
-				{
-					fwprintf(stderr, L"%d: Code.Sec cell ended too soon\n", __LINE__);
-					exit(EXIT_FAILURE);
-				}
-			}
-			PLesson = FindTheLesson(CellStart, helper, &PProgramme->APLessons);
-
-			helper++;
-			if (helper >= CellEnd)
-			{
-				fwprintf(stderr, L"%d: Code.Sec cell ended too soon\n", __LINE__);
-				exit(EXIT_FAILURE);
-			}
-			PSectionLookup = FindTheLookup(helper, CellEnd, &APSectionLookups);
-
 			// Name cell
 			if (!MatchCellContents(RowStart, RowEnd, columnindexlookup.Name, &CellStart, &CellEnd))
 			{
@@ -1670,11 +1738,10 @@ void InterpretDepartmentPage(const MemoryStruct * const data, MyLookup * const P
 			PLesson->PCreditsLookup = FindTheLookup(CellStart, CellEnd, &APCreditsLookups);
 
 			PLesson->PLinkLookup = PLinkLookup;
-			PLectureType = PLesson->APLectureTypes[0];
+			PSection = OneMoreSection(&PLesson->APMainSections);
 		}
 
-		PLectureGroup = OneMoreLectureGroup(&PLectureType->APLectureGroups);
-		PLectureGroup->PSectionLookup = PSectionLookup;
+		PSection->PSectionLookup = PSectionLookup;
 
 		// Instr. cell
 		if (!MatchCellContents(RowStart, RowEnd, columnindexlookup.Instr, &CellStart, &CellEnd))
@@ -1682,7 +1749,7 @@ void InterpretDepartmentPage(const MemoryStruct * const data, MyLookup * const P
 			fwprintf(stderr, L"%d: problem\n", __LINE__);
 			exit(EXIT_FAILURE);
 		}
-		PLectureGroup->PInstructorLookup = FindTheLookup(CellStart, CellEnd, &APInstructorLookups);
+		PSection->PInstructorLookup = FindTheLookup(CellStart, CellEnd, &APInstructorLookups);
 
 		// Days cell
 		if (!MatchCellContents(RowStart, RowEnd, columnindexlookup.Days, &CellStart, &CellEnd))
@@ -1690,7 +1757,7 @@ void InterpretDepartmentPage(const MemoryStruct * const data, MyLookup * const P
 			fwprintf(stderr, L"%d: problem\n", __LINE__);
 			exit(EXIT_FAILURE);
 		}
-		PLectureGroup->PRawDaysLookup = FindTheLookup(CellStart, CellEnd, &APRawDaysLookups);
+		PSection->PRawDaysLookup = FindTheLookup(CellStart, CellEnd, &APRawDaysLookups);
 
 		// Hours cell
 		if (!MatchCellContents(RowStart, RowEnd, columnindexlookup.Hours, &CellStart, &CellEnd))
@@ -1698,7 +1765,7 @@ void InterpretDepartmentPage(const MemoryStruct * const data, MyLookup * const P
 			fwprintf(stderr, L"%d: problem\n", __LINE__);
 			exit(EXIT_FAILURE);
 		}
-		PLectureGroup->PRawSlotsLookup = FindTheLookup(CellStart, CellEnd, &APRawSlotsLookups);
+		PSection->PRawSlotsLookup = FindTheLookup(CellStart, CellEnd, &APRawSlotsLookups);
 
 		// Rooms cell
 		if (!MatchCellContents(RowStart, RowEnd, columnindexlookup.Rooms, &CellStart, &CellEnd))
@@ -1706,56 +1773,64 @@ void InterpretDepartmentPage(const MemoryStruct * const data, MyLookup * const P
 			fwprintf(stderr, L"%d: problem\n", __LINE__);
 			exit(EXIT_FAILURE);
 		}
-		PLectureGroup->PRawClassroomsLookup = FindTheLookup(CellStart, CellEnd, &APRawClassroomsLookups);
+		PSection->PRawClassroomsLookup = FindTheLookup(CellStart, CellEnd, &APRawClassroomsLookups);
+
+		// Required for Dept. cell
+		if (!MatchCellContents(RowStart, RowEnd, columnindexlookup.RawRequiredforDepts, &CellStart, &CellEnd))
+		{
+			fwprintf(stderr, L"%d: problem\n", __LINE__);
+			exit(EXIT_FAILURE);
+		}
+		PSection->PRawRequiredforDeptsLookup = FindTheLookup(CellStart, CellEnd, &APRawRequiredforDeptsLookups);
 
 		// parsing of raw days, slots and classrooms
-		if (wcscmp(PLectureGroup->PRawDaysLookup->Entry, L"TBA") == 0)
+		if (wcscmp(PSection->PRawDaysLookup->Entry, L"TBA") == 0)
 		{
-			PLectureGroup->LectureGroupState = LectureGroupState_TBA;
+			PSection->SectionState = SectionState_TBA;
 		}
 		else
 		{
-			EvaluateRawDays(PLectureGroup);
-			if (PLectureGroup->LectureGroupState == LectureGroupState_Failed)
+			EvaluateRawDays(PSection);
+			if (PSection->SectionState == SectionState_Failed)
 			{
-				fwprintf(stderr, (PLectureType->PLectureTypeLookup == APLectureTypeLookups[1]) ?
+				fwprintf(stderr, (PBonus == NULL) ?
 						 L"%d: %ls %ls.%ls%ls parsing failure on D (%ls)\n" :
 						 L"%d: %ls %ls.%ls (%ls) parsing failure on D (%ls)\n", __LINE__,
 						 PProgramme->PProgrammeLookup->Entry,
 						 PLesson->PLessonLookup->Entry,
-						 PLectureGroup->PSectionLookup->Entry,
-						 (PLectureType->PLectureTypeLookup == APLectureTypeLookups[1]) ? L"" : PLectureType->PLectureTypeLookup->Entry,
-						 PLectureGroup->PRawDaysLookup->Entry);
+						 PSection->PSectionLookup->Entry,
+						 PBonus == NULL ? L"" : PBonus->PBonusTypeLookup->Entry,
+						 PSection->PRawDaysLookup->Entry);
 				continue;
 			}
 
-			EvaluateRawSlots(PLectureGroup);
-			if (PLectureGroup->LectureGroupState == LectureGroupState_OnlyDays)
+			EvaluateRawSlots(PSection);
+			if (PSection->SectionState == SectionState_OnlyDays)
 			{
-				fwprintf(stderr, (PLectureType->PLectureTypeLookup == APLectureTypeLookups[1]) ?
+				fwprintf(stderr, (PBonus == NULL) ?
 						 L"%d: %ls %ls.%ls%ls parsing failure on S (%ls), %u lectures\n" :
 						 L"%d: %ls %ls.%ls (%ls) parsing failure on S (%ls), %u lectures\n", __LINE__,
 						 PProgramme->PProgrammeLookup->Entry,
 						 PLesson->PLessonLookup->Entry,
-						 PLectureGroup->PSectionLookup->Entry,
-						 (PLectureType->PLectureTypeLookup == APLectureTypeLookups[1]) ? L"" : PLectureType->PLectureTypeLookup->Entry,
-						 PLectureGroup->PRawSlotsLookup->Entry,
-						 PLectureGroup->NumberofLectures);
+						 PSection->PSectionLookup->Entry,
+						 PBonus == NULL ? L"" : PBonus->PBonusTypeLookup->Entry,
+						 PSection->PRawSlotsLookup->Entry,
+						 PSection->NumberofLectures);
 				continue;
 			}
 
-			EvaluateRawClassrooms(PLectureGroup);
-			if (PLectureGroup->LectureGroupState == LectureGroupState_DaysandSlots)
+			EvaluateRawClassrooms(PSection);
+			if (PSection->SectionState == SectionState_DaysandSlots)
 			{
-				fwprintf(stderr, (PLectureType->PLectureTypeLookup == APLectureTypeLookups[1]) ?
+				fwprintf(stderr, (PBonus == NULL) ?
 						 L"%d: %ls %ls.%ls%ls parsing failure on C (%ls), %u lectures\n" :
 						 L"%d: %ls %ls.%ls (%ls) parsing failure on C (%ls), %u lectures\n", __LINE__,
 						 PProgramme->PProgrammeLookup->Entry,
 						 PLesson->PLessonLookup->Entry,
-						 PLectureGroup->PSectionLookup->Entry,
-						 (PLectureType->PLectureTypeLookup == APLectureTypeLookups[1]) ? L"" : PLectureType->PLectureTypeLookup->Entry,
-						 PLectureGroup->PRawClassroomsLookup->Entry,
-						 PLectureGroup->NumberofLectures);
+						 PSection->PSectionLookup->Entry,
+						 PBonus == NULL ? L"" : PBonus->PBonusTypeLookup->Entry,
+						 PSection->PRawClassroomsLookup->Entry,
+						 PSection->NumberofLectures);
 				continue;
 			}
 		}
@@ -1885,40 +1960,34 @@ void * MemoryStructReinitialize(MemoryStruct * const storage)
 	return storage->memory;
 }
 
-void InitializeLookup(MyLookup *** const PAPLookup, const size_t AmountofEmpties)
+void InitializeLookup(MyLookup *** const PAPLookup)
 {
-	(*PAPLookup) = malloc((AmountofEmpties + 1) * sizeof * (*PAPLookup));
+	// First entry shall be an empty string reserved as an initial value for newly created elements
+
+	(*PAPLookup) = malloc(2 * sizeof * (*PAPLookup));
 	if ((*PAPLookup) == NULL)
 	{
 		fwprintf(stderr, L"%d: allocation failure\n", __LINE__);
 		exit(EXIT_FAILURE);
 	}
-	(*PAPLookup)[AmountofEmpties] = NULL;
+	(*PAPLookup)[1] = NULL;
 
-	// Amount of Empties many lookup entries from start are reserved for various reasons
-	// Common reasons:
-	// [0] ... initial/default/erroneous value
-	// [1] ... special meaning
-
-	for (size_t i = 0; i < AmountofEmpties; i++)
+	(*PAPLookup)[0] = malloc(sizeof * (*PAPLookup)[0]);
+	if ((*PAPLookup)[0] == NULL)
 	{
-		(*PAPLookup)[i] = malloc(sizeof * (*PAPLookup)[i]);
-		if ((*PAPLookup)[i] == NULL)
-		{
-			fwprintf(stderr, L"%d: allocation failure\n", __LINE__);
-			exit(EXIT_FAILURE);
-		}
-
-		(*PAPLookup)[i]->Entry = malloc(sizeof * (*PAPLookup)[i]->Entry);
-		if ((*PAPLookup)[i]->Entry == NULL)
-		{
-			fwprintf(stderr, L"%d: allocation failure\n", __LINE__);
-			exit(EXIT_FAILURE);
-		}
-		(*PAPLookup)[i]->Entry[0] = L'\0';
-
-		(*PAPLookup)[i]->OrderedIndex = 0U;
+		fwprintf(stderr, L"%d: allocation failure\n", __LINE__);
+		exit(EXIT_FAILURE);
 	}
+
+	(*PAPLookup)[0]->Entry = malloc(sizeof * (*PAPLookup)[0]->Entry);
+	if ((*PAPLookup)[0]->Entry == NULL)
+	{
+		fwprintf(stderr, L"%d: allocation failure\n", __LINE__);
+		exit(EXIT_FAILURE);
+	}
+	(*PAPLookup)[0]->Entry[0] = L'\0';
+
+	(*PAPLookup)[0]->OrderedIndex = 0U;
 }
 
 int CompareLookups(const void * Lookup1, const void * Lookup2)
@@ -1942,19 +2011,20 @@ void SortArrayofLookups(MyLookup ** const APLookups)
 
 void InitializeGlobals(void)
 {
-	InitializeLookup(&APProgrammeLookups, 1);
-	InitializeLookup(&APLessonLookups, 1);
-	InitializeLookup(&APLessonNameLookups, 1);
-	InitializeLookup(&APCreditsLookups, 1);
-	InitializeLookup(&APLinkLookups, 1);
-	InitializeLookup(&APLectureTypeLookups, 2);
+	InitializeLookup(&APProgrammeLookups);
+	InitializeLookup(&APLessonLookups);
+	InitializeLookup(&APLessonNameLookups);
+	InitializeLookup(&APCreditsLookups);
+	InitializeLookup(&APLinkLookups);
+	InitializeLookup(&APBonusTypeLookups);
 	// 2, because ID = 1 will be used for main type of lectures
-	InitializeLookup(&APSectionLookups, 1);
-	InitializeLookup(&APInstructorLookups, 1);
-	InitializeLookup(&APRawDaysLookups, 1);
-	InitializeLookup(&APRawSlotsLookups, 1);
-	InitializeLookup(&APRawClassroomsLookups, 1);
-	InitializeLookup(&APClassroomLookups, 1);
+	InitializeLookup(&APSectionLookups);
+	InitializeLookup(&APInstructorLookups);
+	InitializeLookup(&APRawDaysLookups);
+	InitializeLookup(&APRawSlotsLookups);
+	InitializeLookup(&APRawClassroomsLookups);
+	InitializeLookup(&APRawRequiredforDeptsLookups);
+	InitializeLookup(&APClassroomLookups);
 
 	APProgrammes = malloc(sizeof * APProgrammes);
 	if (APProgrammes == NULL)
@@ -1981,16 +2051,28 @@ void InitializeSomeExtremes(DAYS * const FirstDay, DAYS * const LastDay, unsigne
 	{
 		for (const MyLesson * const * PFirstLessonP = (*PFirstProgrammeP)->APLessons; *PFirstLessonP; PFirstLessonP++)
 		{
-			for (const MyLectureType * const * PFirstLectureTypeP = (*PFirstLessonP)->APLectureTypes; *PFirstLectureTypeP; PFirstLectureTypeP++)
+			for (const MySection * const * PFirstMainSectionP = (*PFirstLessonP)->APMainSections; *PFirstMainSectionP; PFirstMainSectionP++)
 			{
-				for (const MyLectureGroup * const * PFirstLectureGroupP = (*PFirstLectureTypeP)->APLectureGroups; *PFirstLectureGroupP; PFirstLectureGroupP++)
+				if ((*PFirstMainSectionP)->NumberofLectures > 0 && (*PFirstMainSectionP)->SectionState >= SectionState_DaysandSlots)
 				{
-					if ((*PFirstLectureGroupP)->NumberofLectures > 0 && (*PFirstLectureGroupP)->LectureGroupState >= LectureGroupState_DaysandSlots)
+					*FirstDay = PFirstMainSectionP[0]->ALectures[0].Day;
+					*LastDay = PFirstMainSectionP[0]->ALectures[0].Day;
+					*FirstSlot = PFirstMainSectionP[0]->ALectures[0].Slot;
+					*LastSlot = PFirstMainSectionP[0]->ALectures[0].Slot;
+					return;
+				}
+			}
+
+			for (const MyBonus * const * PFirstBonusP = (*PFirstLessonP)->APBonuses; *PFirstBonusP; PFirstBonusP++)
+			{
+				for (const MySection * const * PFirstSectionP = (*PFirstBonusP)->APSections; *PFirstSectionP; PFirstSectionP++)
+				{
+					if ((*PFirstSectionP)->NumberofLectures > 0 && (*PFirstSectionP)->SectionState >= SectionState_DaysandSlots)
 					{
-						*FirstDay = PFirstLectureGroupP[0]->ALectures[0].Day;
-						*LastDay = PFirstLectureGroupP[0]->ALectures[0].Day;
-						*FirstSlot = PFirstLectureGroupP[0]->ALectures[0].Slot;
-						*LastSlot = PFirstLectureGroupP[0]->ALectures[0].Slot;
+						*FirstDay = PFirstSectionP[0]->ALectures[0].Day;
+						*LastDay = PFirstSectionP[0]->ALectures[0].Day;
+						*FirstSlot = PFirstSectionP[0]->ALectures[0].Slot;
+						*LastSlot = PFirstSectionP[0]->ALectures[0].Slot;
 						return;
 					}
 				}
@@ -2012,22 +2094,40 @@ void PrintExtremesIntoFile(FILE * ExtremesFile)
 	{
 		for (const MyLesson * const * PFirstLessonP = (*PFirstProgrammeP)->APLessons; *PFirstLessonP; PFirstLessonP++)
 		{
-			for (const MyLectureType * const * PFirstLectureTypeP = (*PFirstLessonP)->APLectureTypes; *PFirstLectureTypeP; PFirstLectureTypeP++)
+			for (const MySection * const * PFirstMainSectionP = (*PFirstLessonP)->APMainSections; *PFirstMainSectionP; PFirstMainSectionP++)
 			{
-				for (const MyLectureGroup * const * PFirstLectureGroupP = (*PFirstLectureTypeP)->APLectureGroups; *PFirstLectureGroupP; PFirstLectureGroupP++)
+				for (size_t LectureIndex = 0; LectureIndex < (*PFirstMainSectionP)->NumberofLectures; LectureIndex++)
 				{
-					for (size_t LectureIndex = 0; LectureIndex < (*PFirstLectureGroupP)->NumberofLectures; LectureIndex++)
+					if (PFirstMainSectionP[0]->ALectures[LectureIndex].Day < FirstDay)
+						FirstDay = PFirstMainSectionP[0]->ALectures[LectureIndex].Day;
+					if (PFirstMainSectionP[0]->ALectures[LectureIndex].Day > LastDay)
+						LastDay = PFirstMainSectionP[0]->ALectures[LectureIndex].Day;
+					if ((*PFirstMainSectionP)->SectionState >= SectionState_DaysandSlots)
 					{
-						if (PFirstLectureGroupP[0]->ALectures[LectureIndex].Day < FirstDay)
-							FirstDay = PFirstLectureGroupP[0]->ALectures[LectureIndex].Day;
-						if (PFirstLectureGroupP[0]->ALectures[LectureIndex].Day > LastDay)
-							LastDay = PFirstLectureGroupP[0]->ALectures[LectureIndex].Day;
-						if ((*PFirstLectureGroupP)->LectureGroupState >= LectureGroupState_DaysandSlots)
+						if (PFirstMainSectionP[0]->ALectures[LectureIndex].Slot < FirstSlot)
+							FirstSlot = PFirstMainSectionP[0]->ALectures[LectureIndex].Slot;
+						if (PFirstMainSectionP[0]->ALectures[LectureIndex].Slot > LastSlot)
+							LastSlot = PFirstMainSectionP[0]->ALectures[LectureIndex].Slot;
+					}
+				}
+			}
+
+			for (const MyBonus * const * PFirstBonusP = (*PFirstLessonP)->APBonuses; *PFirstBonusP; PFirstBonusP++)
+			{
+				for (const MySection * const * PFirstSectionP = (*PFirstBonusP)->APSections; *PFirstSectionP; PFirstSectionP++)
+				{
+					for (size_t LectureIndex = 0; LectureIndex < (*PFirstSectionP)->NumberofLectures; LectureIndex++)
+					{
+						if (PFirstSectionP[0]->ALectures[LectureIndex].Day < FirstDay)
+							FirstDay = PFirstSectionP[0]->ALectures[LectureIndex].Day;
+						if (PFirstSectionP[0]->ALectures[LectureIndex].Day > LastDay)
+							LastDay = PFirstSectionP[0]->ALectures[LectureIndex].Day;
+						if ((*PFirstSectionP)->SectionState >= SectionState_DaysandSlots)
 						{
-							if (PFirstLectureGroupP[0]->ALectures[LectureIndex].Slot < FirstSlot)
-								FirstSlot = PFirstLectureGroupP[0]->ALectures[LectureIndex].Slot;
-							if (PFirstLectureGroupP[0]->ALectures[LectureIndex].Slot > LastSlot)
-								LastSlot = PFirstLectureGroupP[0]->ALectures[LectureIndex].Slot;
+							if (PFirstSectionP[0]->ALectures[LectureIndex].Slot < FirstSlot)
+								FirstSlot = PFirstSectionP[0]->ALectures[LectureIndex].Slot;
+							if (PFirstSectionP[0]->ALectures[LectureIndex].Slot > LastSlot)
+								LastSlot = PFirstSectionP[0]->ALectures[LectureIndex].Slot;
 						}
 					}
 				}
@@ -2035,7 +2135,7 @@ void PrintExtremesIntoFile(FILE * ExtremesFile)
 		}
 	}
 
-	fwprintf(ExtremesFile, L"%u|%u|%u|%u|%u|%u|%u|%u|%u|%u|%u|%u|%u|%u|%u|%u",
+	fwprintf(ExtremesFile, L"%u|%u|%u|%u|%u|%u|%u|%u|%u|%u|%u|%u|%u|%u|%u|%u|%u",
 			 (unsigned int) FirstDay,
 			 (unsigned int) LastDay,
 			 FirstSlot,
@@ -2045,12 +2145,13 @@ void PrintExtremesIntoFile(FILE * ExtremesFile)
 			 FindLongestEntryLength(APLessonNameLookups),
 			 FindLongestEntryLength(APCreditsLookups),
 			 FindLongestEntryLength(APLinkLookups),
-			 FindLongestEntryLength(APLectureTypeLookups),
+			 FindLongestEntryLength(APBonusTypeLookups),
 			 FindLongestEntryLength(APSectionLookups),
 			 FindLongestEntryLength(APInstructorLookups),
 			 FindLongestEntryLength(APRawDaysLookups),
 			 FindLongestEntryLength(APRawSlotsLookups),
 			 FindLongestEntryLength(APRawClassroomsLookups),
+			 FindLongestEntryLength(APRawRequiredforDeptsLookups),
 			 FindLongestEntryLength(APClassroomLookups)
 			 );
 }
@@ -2154,31 +2255,33 @@ int main(void)
 	SortArrayofLookups(APLessonNameLookups);
 	SortArrayofLookups(APCreditsLookups);
 	SortArrayofLookups(APLinkLookups);
-	SortArrayofLookups(APLectureTypeLookups);
+	SortArrayofLookups(APBonusTypeLookups);
 	SortArrayofLookups(APSectionLookups);
 	SortArrayofLookups(APInstructorLookups);
 	SortArrayofLookups(APRawDaysLookups);
 	SortArrayofLookups(APRawSlotsLookups);
 	SortArrayofLookups(APRawClassroomsLookups);
+	SortArrayofLookups(APRawRequiredforDeptsLookups);
 	SortArrayofLookups(APClassroomLookups);
 
-	FILE * ProgrammeLookupFile		= _wfopen(L"ProgrammeLookup.txt",		L"w, ccs=UNICODE");
-	FILE * LessonLookupFile			= _wfopen(L"LessonLookup.txt",			L"w, ccs=UNICODE");
-	FILE * LessonNameLookupFile		= _wfopen(L"LessonNameLookup.txt",		L"w, ccs=UNICODE");
-	FILE * CreditsLookupFile		= _wfopen(L"CreditsLookup.txt",			L"w, ccs=UNICODE");
-	FILE * LinkLookupFile			= _wfopen(L"LinkLookup.txt",			L"w, ccs=UNICODE");
-	FILE * LectureTypeLookupFile	= _wfopen(L"LectureTypeLookup.txt",		L"w, ccs=UNICODE");
-	FILE * SectionLookupFile		= _wfopen(L"SectionLookup.txt",			L"w, ccs=UNICODE");
-	FILE * InstructorLookupFile		= _wfopen(L"InstructorLookup.txt",		L"w, ccs=UNICODE");
-	FILE * RawDaysLookupFile		= _wfopen(L"RawDaysLookup.txt",			L"w, ccs=UNICODE");
-	FILE * RawSlotsLookupFile		= _wfopen(L"RawSlotsLookup.txt",		L"w, ccs=UNICODE");
-	FILE * RawClassroomsLookupFile	= _wfopen(L"RawClassroomsLookup.txt",	L"w, ccs=UNICODE");
-	FILE * ClassroomLookupFile		= _wfopen(L"ClassroomLookup.txt",		L"w, ccs=UNICODE");
+	FILE * ProgrammeLookupFile				= _wfopen(L"ProgrammeLookup.txt",			L"w, ccs=UNICODE");
+	FILE * LessonLookupFile					= _wfopen(L"LessonLookup.txt",				L"w, ccs=UNICODE");
+	FILE * LessonNameLookupFile				= _wfopen(L"LessonNameLookup.txt",			L"w, ccs=UNICODE");
+	FILE * CreditsLookupFile				= _wfopen(L"CreditsLookup.txt",				L"w, ccs=UNICODE");
+	FILE * LinkLookupFile					= _wfopen(L"LinkLookup.txt",				L"w, ccs=UNICODE");
+	FILE * BonusTypeLookupFile				= _wfopen(L"BonusTypeLookup.txt",			L"w, ccs=UNICODE");
+	FILE * SectionLookupFile				= _wfopen(L"SectionLookup.txt",				L"w, ccs=UNICODE");
+	FILE * InstructorLookupFile				= _wfopen(L"InstructorLookup.txt",			L"w, ccs=UNICODE");
+	FILE * RawDaysLookupFile				= _wfopen(L"RawDaysLookup.txt",				L"w, ccs=UNICODE");
+	FILE * RawSlotsLookupFile				= _wfopen(L"RawSlotsLookup.txt",			L"w, ccs=UNICODE");
+	FILE * RawClassroomsLookupFile			= _wfopen(L"RawClassroomsLookup.txt",		L"w, ccs=UNICODE");
+	FILE * RawRequiredforDeptsLookupFile	= _wfopen(L"RawRequiredforDeptsLookup.txt",	L"w, ccs=UNICODE");
+	FILE * ClassroomLookupFile				= _wfopen(L"ClassroomLookup.txt",			L"w, ccs=UNICODE");
 
-	FILE * ProgrammesArrayFile		= _wfopen(L"ProgrammesArray.txt",		L"w, ccs=UNICODE");
-	FILE * ExtremesFile				= _wfopen(L"Extremes.txt",				L"w, ccs=UNICODE");
-	if (!ProgrammeLookupFile || !LessonLookupFile || !LessonNameLookupFile || !CreditsLookupFile || !LinkLookupFile || !LectureTypeLookupFile || !SectionLookupFile ||
-		!InstructorLookupFile || !RawDaysLookupFile || !RawSlotsLookupFile || !RawClassroomsLookupFile || !ClassroomLookupFile || !ProgrammesArrayFile || !ExtremesFile)
+	FILE * ProgrammesArrayFile				= _wfopen(L"ProgrammesArray.txt",			L"w, ccs=UNICODE");
+	FILE * ExtremesFile						= _wfopen(L"Extremes.txt",					L"w, ccs=UNICODE");
+	if (!ProgrammeLookupFile || !LessonLookupFile || !LessonNameLookupFile || !CreditsLookupFile || !LinkLookupFile || !BonusTypeLookupFile || !SectionLookupFile ||
+		!InstructorLookupFile || !RawDaysLookupFile || !RawSlotsLookupFile || !RawClassroomsLookupFile || !RawRequiredforDeptsLookupFile || !ClassroomLookupFile || !ProgrammesArrayFile || !ExtremesFile)
 	{
 		fwprintf(stderr, L"%d: problem\n", __LINE__);
 		return EXIT_FAILURE;
@@ -2204,9 +2307,9 @@ int main(void)
 	fclose(LinkLookupFile);
 	LinkLookupFile = NULL;
 
-	PrintLookupIntoFile(LectureTypeLookupFile, APLectureTypeLookups);
-	fclose(LectureTypeLookupFile);
-	LectureTypeLookupFile = NULL;
+	PrintLookupIntoFile(BonusTypeLookupFile, APBonusTypeLookups);
+	fclose(BonusTypeLookupFile);
+	BonusTypeLookupFile = NULL;
 
 	PrintLookupIntoFile(SectionLookupFile, APSectionLookups);
 	fclose(SectionLookupFile);
@@ -2227,6 +2330,10 @@ int main(void)
 	PrintLookupIntoFile(RawClassroomsLookupFile, APRawClassroomsLookups);
 	fclose(RawClassroomsLookupFile);
 	RawClassroomsLookupFile = NULL;
+
+	PrintLookupIntoFile(RawRequiredforDeptsLookupFile, APRawRequiredforDeptsLookups);
+	fclose(RawRequiredforDeptsLookupFile);
+	RawRequiredforDeptsLookupFile = NULL;
 
 	PrintLookupIntoFile(ClassroomLookupFile, APClassroomLookups);
 	fclose(ClassroomLookupFile);
