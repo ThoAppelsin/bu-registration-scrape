@@ -1,8 +1,8 @@
-This project had been developed to crawl on Bogazici University registration system to gather course schedule data,
+This project had been developed to crawl on Boğaziçi University registration system to gather course schedule data,
 in C, using the [CURL](https://github.com/curl/curl) library.
 The project had been initiated on August of 2014,
 during the summer break after my first year at the university.
-The project is uploaded to GitHub just now, for the record and publicization.
+The project is uploaded to GitHub just now, for the record and publication.
 
 ## Purpose
 
