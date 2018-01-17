@@ -1,5 +1,6 @@
 This project had been developed to crawl on Boğaziçi University registration system to gather course schedule data,
 in C, using the [CURL](https://github.com/curl/curl) library.
+
 The project had been initiated on August of 2014,
 during the summer break after my first year at the university.
 The project is uploaded to GitHub just now, for the record and publication.
@@ -12,8 +13,8 @@ and generate a database out of them. Asking the registrar office for the data co
 but I believed that the procedures for that would take a while.
 Furthermore, such a request could very well also be denied, since;
 
-a) They would not want to bother.
-b) There could be information that is not publicly available on the database, so they would have to filter those out
+1) They would not want to bother.
+2) There could be information that is not publicly available on the database, so they would have to filter those out
 to prevent a possible leak of information, which they again would not want to bother about.
 
 With this data, my aim was to make a much more informative and interactive application for the convenience
@@ -25,7 +26,7 @@ of every user of the original system. Among the features planned, following are 
 
 All these would be trivially possible after the collected data is structured and standardized, and the relations were built.
 
-## Reason for discontinuation
+## Reasons for discontinuation
 
 The schedule is displayed in a very cryptic manner on our university's registration pages.
 Lack of proper delimiters between days (ranging from Monday to Saturday), slots (ranging from 1 to 12, 13),
